@@ -1,0 +1,170 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyberwatch AI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <header class="command-bar">
+        <div class="brand">
+            <span class="status-dot"></span>
+            <h1>MONITOR THE SITUATION</h1>
+            <span id="feed-count">LIVE INTELLIGENCE FEEDS</span>
+        </div>
+        <div class="time-grid" id="world-clocks"></div>
+    </header>
+
+    <main class="ops-grid">
+        <aside class="rail left-rail">
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>BGP - HIJACKS</h2>
+                    <span>CLOUDFLARE RADAR</span>
+                </div>
+                <div class="table compact" id="bgp-feed"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>OUTAGES - CF RADAR</h2>
+                    <span>ACTIVE</span>
+                </div>
+                <div class="table compact" id="outage-feed"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>SOLAR WIND</h2>
+                    <span>NOAA SWPC</span>
+                </div>
+                <div class="metric-grid">
+                    <div><strong id="solar-wind">383 km/s</strong><span>WIND</span></div>
+                    <div><strong id="solar-density">9.6 /cc</strong><span>DENSITY</span></div>
+                    <div><strong id="solar-bt">10.2 nT</strong><span>BT</span></div>
+                    <div><strong id="solar-kp">3.7</strong><span>KP INDEX</span></div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>FEED STATUS</h2>
+                    <span>BACKEND</span>
+                </div>
+                <div id="feed-status" class="feed-status"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>ACTIVE ALERTS</h2>
+                    <span>RULES</span>
+                </div>
+                <div id="alert-list" class="alert-list"></div>
+            </section>
+        </aside>
+
+        <section class="mission">
+            <div class="mission-top">
+                <div class="summary-strip">
+                    <div><span>Critical CVEs</span><strong id="critical-cves">0</strong></div>
+                    <div><span>Active Exploits</span><strong id="active-exploits">0</strong></div>
+                    <div><span>Threat Actors</span><strong id="threat-actors">0</strong></div>
+                    <div><span>Victims</span><strong id="victims">0</strong></div>
+                    <div><span>AI Score</span><strong id="threat-score">0.0</strong></div>
+                </div>
+                <button class="refresh-button" id="refresh-button" type="button">REFRESH</button>
+            </div>
+
+            <div class="globe-wrap">
+                <canvas class="globe-canvas" id="threat-globe" width="460" height="460"></canvas>
+                <div class="legend">
+                    <span><i class="red"></i>Ransomware</span>
+                    <span><i class="amber"></i>Outage</span>
+                    <span><i class="violet"></i>Hijack</span>
+                    <span><i class="blue"></i>Scan</span>
+                    <span><i class="green"></i>Exploit</span>
+                </div>
+                <div class="iss-readout">
+                    <span>GLOBAL POSITION</span>
+                    <strong id="position-readout">50.71, -0.08</strong>
+                </div>
+            </div>
+
+            <section class="lower-deck">
+                <div class="panel">
+                    <div class="panel-title">
+                        <h2>THREAT TREND</h2>
+                        <span>7 DAY</span>
+                    </div>
+                    <canvas id="threat-chart" width="640" height="220"></canvas>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">
+                        <h2>AI SUMMARY</h2>
+                        <span id="assessment-state">HIGH</span>
+                    </div>
+                    <div class="assessment" id="ai-summary">
+                        <strong id="assessment-score">0.0 / 10</strong>
+                        <p id="assessment-copy">Analyzing live intelligence.</p>
+                        <ul id="ai-actions"></ul>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">
+                        <h2>TARGETED INDUSTRIES</h2>
+                        <span>RISK</span>
+                    </div>
+                    <div id="industry-list" class="industry-list"></div>
+                </div>
+            </section>
+
+            <section class="risk-rings" id="risk-rings"></section>
+        </section>
+
+        <aside class="rail right-rail">
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>KEY - CISA EXPLOITED</h2>
+                    <span>CISA.GOV</span>
+                </div>
+                <div class="table" id="cve-feed"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>RANSOMWARE - VICTIMS</h2>
+                    <span>LIVE</span>
+                </div>
+                <div class="table" id="ransomware-feed"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>EVENT LOG</h2>
+                    <span>LIVE</span>
+                </div>
+                <div id="event-log" class="event-log"></div>
+            </section>
+        </aside>
+    </main>
+
+    <aside class="incident-drawer" id="incident-drawer" aria-hidden="true">
+        <div class="drawer-header">
+            <div>
+                <span id="drawer-type">INCIDENT</span>
+                <h2 id="drawer-title">No incident selected</h2>
+            </div>
+            <button type="button" id="drawer-close" title="Close incident drawer">CLOSE</button>
+        </div>
+        <div class="drawer-grid" id="drawer-meta"></div>
+        <p id="drawer-description"></p>
+        <div class="drawer-actions">
+            <h3>Recommended Actions</h3>
+            <ul id="drawer-actions"></ul>
+        </div>
+    </aside>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

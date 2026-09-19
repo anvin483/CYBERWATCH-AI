@@ -1,0 +1,213 @@
+/* =========================
+   GLOBE SECTION
+========================= */
+
+.globe-section {
+
+    display: grid;
+
+    grid-template-columns:
+        300px
+        1fr
+        300px;
+
+    gap: 20px;
+
+    margin-top: 20px;
+
+    width: 100%;
+}
+
+.left-feed,
+.right-feed{
+    background:#071529;
+    border:1px solid cyan;
+    border-radius:12px;
+    padding:20px;
+    height:500px;
+    overflow-y:auto;
+    box-shadow:0 0 15px cyan;
+}
+
+.left-feed h2,
+.right-feed h2{
+    color:white;
+    margin-bottom:15px;
+}
+
+.center-globe {
+
+    background: #071529;
+
+    border: 1px solid cyan;
+
+    border-radius: 12px;
+
+    padding: 20px;
+
+    box-shadow: 0 0 20px cyan;
+
+    height: 760px;
+
+    display: flex;
+
+    flex-direction: column;
+}
+
+.center-globe h2{
+    text-align:center;
+    color:white;
+    margin-bottom:15px;
+}
+
+#globe {
+
+    width: 100%;
+
+    height: 620px;
+
+    background: #000;
+
+    border-radius: 12px;
+
+    overflow: hidden;
+
+    position: relative;
+}
+
+/* Feed Items */
+
+.feed-item{
+
+    background:#0f1c2d;
+
+    padding:12px;
+
+    margin-bottom:12px;
+
+    border-left:4px solid cyan;
+
+    border-radius:6px;
+
+    color:white;
+
+    font-size:14px;
+}
+
+.feed-item:hover{
+    background:#13263d;
+}
+
+/* Responsive */
+
+@media(max-width:1200px){
+
+    .globe-section{
+    display:grid !important;
+    grid-template-columns:300px 1fr 300px !important;
+    border:2px solid red;
+}
+
+.left-feed{
+    border:2px solid yellow;
+}
+
+.center-globe{
+    border:2px solid green;
+}
+
+.right-feed{
+    border:2px solid blue;
+}
+
+    #globe{
+        height:400px;
+    }
+}
+.feed-item{
+    background:#0f1c2d;
+    padding:10px;
+    margin-bottom:10px;
+    border-left:4px solid cyan;
+    border-radius:5px;
+    color:white;
+}
+
+#cve-feed,
+
+#ransomware-feed {
+
+color: white;
+
+font-size: 14px;
+
+}
+
+.feed-item {
+
+background: #10233d;
+
+color: white;
+
+padding: 12px;
+
+margin-bottom: 12px;
+
+border-left: 4px solid #00ffff;
+
+border-radius: 6px;
+
+box-shadow: 0 0 10px rgba(0,255,255,0.3);
+
+}
+
+.feed-item strong {
+
+color: #00ffff;
+
+}
+
+#attack-feed {
+
+    max-height: 120px;
+
+    overflow-y: auto;
+
+    margin-top: 10px;
+
+    margin-bottom: 15px;
+
+    border: 1px solid cyan;
+
+    border-radius: 8px;
+
+    padding: 10px;
+}
+
+.attack-item{
+
+    padding:6px;
+
+    border-bottom:1px solid rgba(0,255,255,0.2);
+}
+
+.threat-stats {
+
+    display: flex;
+
+    justify-content: center;
+
+    gap: 15px;
+
+    margin-top: 10px;
+
+    margin-bottom: 15px;
+
+    color: cyan;
+
+    font-size: 14px;
+
+    font-weight: bold;
+
+    flex-wrap: wrap;
+}
