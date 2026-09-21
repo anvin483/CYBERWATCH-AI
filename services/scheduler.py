@@ -1,16 +1,21 @@
 import threading
 import time
 
-from services.feed_manager import refresh_feeds
+from services.maintenance import apply_retention
+from services.queue import enqueue_refresh
 
 
 _started = False
 
 
 def _run_scheduler():
+    cycles = 0
     while True:
         time.sleep(900)
-        refresh_feeds()
+        enqueue_refresh()
+        cycles += 1
+        if cycles % 16 == 0:
+            apply_retention()
 
 
 def start_scheduler():

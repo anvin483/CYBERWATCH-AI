@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>Cyberwatch AI</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
 </head>
@@ -21,7 +22,7 @@
             <section class="panel">
                 <div class="panel-title">
                     <h2>BGP - HIJACKS</h2>
-                    <span>CLOUDFLARE RADAR</span>
+                <span>CLOUDFLARE RADAR <em id="bgp-panel-status" class="panel-state offline">OFFLINE</em></span>
                 </div>
                 <div class="table compact" id="bgp-feed"></div>
             </section>
@@ -29,15 +30,15 @@
             <section class="panel">
                 <div class="panel-title">
                     <h2>OUTAGES - CF RADAR</h2>
-                    <span>ACTIVE</span>
+                <span>ACTIVE <em id="outage-panel-status" class="panel-state offline">OFFLINE</em></span>
                 </div>
                 <div class="table compact" id="outage-feed"></div>
             </section>
 
             <section class="panel">
                 <div class="panel-title">
-                    <h2>SOLAR WIND</h2>
-                    <span>NOAA SWPC</span>
+                    <h2>SOLAR WIND · ENVIRONMENTAL</h2>
+                <span>NOAA SWPC <em id="solar-panel-status" class="panel-state offline">OFFLINE</em></span>
                 </div>
                 <div class="metric-grid">
                     <div><strong id="solar-wind">383 km/s</strong><span>WIND</span></div>
@@ -45,23 +46,32 @@
                     <div><strong id="solar-bt">10.2 nT</strong><span>BT</span></div>
                     <div><strong id="solar-kp">3.7</strong><span>KP INDEX</span></div>
                 </div>
+                <small class="telemetry-freshness" id="solar-freshness">NOAA observation pending</small>
             </section>
 
             <section class="panel">
                 <div class="panel-title">
                     <h2>FEED STATUS</h2>
-                    <span>BACKEND</span>
+                <span>BACKEND <em id="backend-panel-status" class="panel-state offline">OFFLINE</em></span>
                 </div>
                 <div id="feed-status" class="feed-status"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel sensor-health-panel">
                 <div class="panel-title">
-                    <h2>ACTIVE ALERTS</h2>
-                    <span>RULES</span>
+                    <h2>SENSOR HEALTH</h2>
+                    <span>OPERATIONS <em id="sensor-health-status" class="panel-state offline">OFFLINE</em></span>
                 </div>
-                <div id="alert-list" class="alert-list"></div>
+                <div class="health-grid">
+                    <div><span>Sensor</span><strong id="health-sensor-name">NO SENSOR</strong></div>
+                    <div><span>Last heartbeat</span><strong id="health-last-seen">NEVER</strong></div>
+                    <div><span>Sensor events</span><strong id="health-event-count">0</strong></div>
+                    <div><span>Local nodes</span><strong id="health-local-count">0</strong></div>
+                    <div><span>Global nodes</span><strong id="health-global-count">0</strong></div>
+                    <div><span>Database / API</span><strong id="health-api-state">UNKNOWN</strong></div>
+                </div>
             </section>
+
         </aside>
 
         <section class="mission">
@@ -79,6 +89,8 @@
             <div class="globe-wrap">
                 <canvas class="globe-canvas" id="threat-globe" width="460" height="460"></canvas>
                 <div class="legend">
+                    <span><i class="local-sensor"></i>LOCAL SENSOR <b id="local-node-count">0</b></span>
+                    <span><i class="global-intel"></i>GLOBAL INTELLIGENCE <b id="global-node-count">0</b></span>
                     <span><i class="red"></i>Ransomware</span>
                     <span><i class="amber"></i>Outage</span>
                     <span><i class="violet"></i>Hijack</span>
@@ -86,7 +98,7 @@
                     <span><i class="green"></i>Exploit</span>
                 </div>
                 <div class="iss-readout">
-                    <span>GLOBAL POSITION</span>
+                    <span>GLOBAL INTELLIGENCE · LOCAL SENSOR DOTS</span>
                     <strong id="position-readout">50.71, -0.08</strong>
                 </div>
             </div>
@@ -117,6 +129,16 @@
                     </div>
                     <div id="industry-list" class="industry-list"></div>
                 </div>
+                <div class="panel telemetry-panel">
+                    <div class="panel-title">
+                        <h2>LIVE TELEMETRY</h2>
+                        <span>ROLLING</span>
+                    </div>
+                    <div class="mini-chart-label"><span>Solar wind</span><strong id="solar-chart-value">--</strong></div>
+                    <canvas id="solar-chart" width="320" height="90"></canvas>
+                    <div class="mini-chart-label"><span>Sensor activity</span><strong id="sensor-chart-value">--</strong></div>
+                    <canvas id="sensor-chart" width="320" height="90"></canvas>
+                </div>
             </section>
 
             <section class="risk-rings" id="risk-rings"></section>
@@ -126,7 +148,7 @@
             <section class="panel">
                 <div class="panel-title">
                     <h2>KEY - CISA EXPLOITED</h2>
-                    <span>CISA.GOV</span>
+                        <span>CISA.GOV <em id="cve-panel-status" class="panel-state offline">OFFLINE</em></span>
                 </div>
                 <div class="table" id="cve-feed"></div>
             </section>
@@ -134,17 +156,60 @@
             <section class="panel">
                 <div class="panel-title">
                     <h2>RANSOMWARE - VICTIMS</h2>
-                    <span>LIVE</span>
+                <span>RANSOMWARE.LIVE <em id="ransomware-panel-status" class="panel-state offline">OFFLINE</em></span>
                 </div>
                 <div class="table" id="ransomware-feed"></div>
+            </section>
+
+            <section class="panel incident-analysis">
+                <div class="panel-title">
+                    <h2>SITUATION ANALYZER</h2>
+                    <span>MITRE / CORRELATION</span>
+                </div>
+                <div id="incident-list" class="incident-list"></div>
             </section>
 
             <section class="panel">
                 <div class="panel-title">
                     <h2>EVENT LOG</h2>
-                    <span>LIVE</span>
+                <span>STREAM <em id="event-panel-status" class="panel-state offline">OFFLINE</em></span>
                 </div>
                 <div id="event-log" class="event-log"></div>
+            </section>
+
+            <section class="panel asset-panel">
+                <div class="panel-title">
+                    <h2>ASSET INVENTORY</h2>
+                    <span id="asset-count">0 ASSETS</span>
+                </div>
+                <form id="asset-form" class="asset-form">
+                    <input name="name" placeholder="Asset name" aria-label="Asset name" required>
+                    <select name="asset_type" aria-label="Asset type">
+                        <option value="server">Server</option>
+                        <option value="laptop">Laptop</option>
+                        <option value="network_device">Network device</option>
+                        <option value="cloud">Cloud resource</option>
+                        <option value="application">Application</option>
+                        <option value="business_system">Business system</option>
+                    </select>
+                    <input name="ip_address" placeholder="IP address" aria-label="IP address">
+                    <select name="criticality" aria-label="Criticality">
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                        <option value="low">Low</option>
+                    </select>
+                    <button type="submit">REGISTER</button>
+                </form>
+                <div id="asset-list" class="asset-list"></div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-title">
+                    <h2>ACTIVE ALERTS</h2>
+                    <span>RULES</span>
+                </div>
+                <div id="alert-list" class="alert-list"></div>
             </section>
         </aside>
     </main>
@@ -159,9 +224,53 @@
         </div>
         <div class="drawer-grid" id="drawer-meta"></div>
         <p id="drawer-description"></p>
+        <div class="drawer-section">
+            <h3>EVIDENCE</h3>
+            <ul id="drawer-evidence"></ul>
+        </div>
         <div class="drawer-actions">
             <h3>Recommended Actions</h3>
             <ul id="drawer-actions"></ul>
+        </div>
+        <div id="incident-controls" class="incident-controls" hidden>
+            <h3>Investigation Workspace</h3>
+            <label>Status<select id="incident-status">
+                <option value="new">NEW</option>
+                <option value="investigating">INVESTIGATING</option>
+                <option value="contained">CONTAINED</option>
+                <option value="resolved">RESOLVED</option>
+                <option value="false_positive">FALSE POSITIVE</option>
+            </select></label>
+            <label>Assigned analyst<input id="incident-assigned" maxlength="120" placeholder="Analyst name"></label>
+            <label>Analyst notes<textarea id="incident-notes" maxlength="4000" rows="4" placeholder="Record investigation findings"></textarea></label>
+            <label>Closure reason<input id="incident-closure" maxlength="500" placeholder="Required for resolved or false positive"></label>
+            <button type="button" id="incident-save">SAVE INCIDENT</button>
+            <div class="incident-toolbar">
+                <button type="button" id="incident-ai">RUN AI ANALYST</button>
+                <button type="button" id="incident-notify">SEND ALERTS</button>
+            </div>
+            <div id="incident-ai-result" class="ai-result"></div>
+            <div class="drawer-subsection">
+                <h3>CONTROLLED RESPONSE</h3>
+                <select id="response-action-type">
+                    <option value="block_ip">REQUEST IP BLOCK</option>
+                    <option value="disable_user">REQUEST USER DISABLE</option>
+                    <option value="isolate_endpoint">REQUEST ENDPOINT ISOLATION</option>
+                    <option value="create_ticket">REQUEST TICKET</option>
+                </select>
+                <input id="response-action-target" maxlength="255" placeholder="Target IP, user, endpoint, or ticket queue">
+                <button type="button" id="response-action-submit">REQUEST APPROVAL</button>
+                <div id="response-action-list"></div>
+            </div>
+            <div class="drawer-subsection">
+                <h3>COMMENTS</h3>
+                <div id="incident-comments"></div>
+                <div class="comment-entry"><input id="incident-comment-input" maxlength="4000" placeholder="Add analyst comment"><button type="button" id="incident-comment-submit">ADD</button></div>
+            </div>
+            <div class="drawer-subsection">
+                <h3>TIMELINE</h3>
+                <div id="incident-timeline"></div>
+            </div>
         </div>
     </aside>
 

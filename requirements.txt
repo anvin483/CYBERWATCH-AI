@@ -3,3 +3,10 @@ gunicorn
 requests
 pandas
 numpy
+python-dotenv
+geoip2
+psycopg[binary]
+redis
+rq
+psutil
+pytest

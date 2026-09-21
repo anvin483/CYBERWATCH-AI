@@ -1,0 +1,15 @@
+{
+  "events": [
+    {
+      "event_type": "intrusion",
+      "signature": "ET SCAN Suspicious inbound connection",
+      "severity": "high",
+      "src_ip": "203.0.113.24",
+      "dest_ip": "192.0.2.10",
+      "src_country": "United States",
+      "dest_country": "India",
+      "source": "Suricata edge-01",
+      "timestamp": "2026-09-19T16:30:00Z"
+    }
+  ]
+}

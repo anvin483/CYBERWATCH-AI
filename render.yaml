@@ -15,3 +15,15 @@ services:
         generateValue: true
       - key: SECRET_KEY
         generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cyberwatch-db
+          property: connectionString
+      - key: RETENTION_DAYS
+        value: "90"
+
+databases:
+  - name: cyberwatch-db
+    databaseName: cyberwatch
+    user: cyberwatch
+    plan: free

@@ -9,10 +9,17 @@
     feedStatus: [],
     aiSummary: null,
     alerts: [],
+    assets: [],
+    incidents: [],
+    opsHealth: null,
+    liveFeeds: null,
     markerElements: [],
     liveThreats: [],
     startedAt: Date.now(),
     rotation: 0,
+    activeIncidentId: null,
+    telemetryHistory: [],
+    sensorHistory: [],
 };
 
 const clocks = [
@@ -23,24 +30,6 @@ const clocks = [
     ["DXB", "Asia/Dubai"],
     ["BOM", "Asia/Kolkata"],
     ["HKG", "Asia/Hong_Kong"],
-];
-
-const bgpRows = [
-    ["US", "Cloudflare", "104.16/12"],
-    ["US", "Amazon AWS", "3.0/8"],
-    ["US", "Microsoft", "20.0/14"],
-    ["US", "Google LLC", "8.8/24"],
-    ["SE", "Arelion", "62.115/16"],
-    ["US", "Cogent", "38.0/8"],
-];
-
-const outageRows = [
-    ["UA", "conflict", "active"],
-    ["RU", "regime", "active"],
-    ["MM", "regime", "active"],
-    ["IR", "regime", "active"],
-    ["SY", "conflict", "ended"],
-    ["CN", "policy", "active"],
 ];
 
 const liveEvents = [];
@@ -83,6 +72,23 @@ async function getJson(url) {
     return response.json();
 }
 
+async function safeJson(url, fallback) {
+    try {
+        return await getJson(url);
+    } catch (error) {
+        console.warn(`Feed unavailable: ${url}`);
+        return fallback;
+    }
+}
+
+function mutationHeaders() {
+    return { "Content-Type": "application/json", "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]')?.content || "" };
+}
+
+function emptyState(message) {
+    return `<div class="empty-state"><span class="empty-state-dot"></span>${message}</div>`;
+}
+
 function renderClocks() {
     const container = document.getElementById("world-clocks");
     if (!container) return;
@@ -99,28 +105,31 @@ function renderClocks() {
     }).join("");
 }
 
-function renderStaticTables() {
+function renderLiveFeedTables() {
     const bgp = document.getElementById("bgp-feed");
     const outages = document.getElementById("outage-feed");
+    const bgpRows = state.liveFeeds?.bgp?.items || [];
+    const outageRows = state.liveFeeds?.outages?.items || [];
+    renderPanelStatuses();
 
     if (bgp) {
-        bgp.innerHTML = bgpRows.map(row => `
+        bgp.innerHTML = bgpRows.length ? bgpRows.map(row => `
             <div class="table-row">
-                <span class="badge">${row[0]}</span>
-                <span class="row-title">${row[1]}</span>
-                <span class="row-meta">${row[2]}</span>
+                <span class="badge">${row.cc || "--"}</span>
+                <span class="row-title">${row.isp || row.asn || "Unknown"}</span>
+                <span class="row-meta">${row.prefix || row.ago || "--"}</span>
             </div>
-        `).join("");
+        `).join("") : emptyState("RADAR DATA WAITING");
     }
 
     if (outages) {
-        outages.innerHTML = outageRows.map(row => `
+        outages.innerHTML = outageRows.length ? outageRows.map(row => `
             <div class="table-row">
-                <span class="badge">${row[0]}</span>
-                <span class="row-title">${row[1]}</span>
-                <span class="${row[2] === "active" ? "row-hot" : "row-meta"}">${row[2]}</span>
+                <span class="badge">${row.cc || "--"}</span>
+                <span class="row-title">${row.cause || "anomaly"}</span>
+                <span class="${row.state === "active" ? "row-hot" : "row-meta"}">${row.state || "live"}</span>
             </div>
-        `).join("");
+        `).join("") : emptyState("NO OUTAGE OBSERVATION");
     }
 }
 
@@ -128,18 +137,18 @@ function renderSummary() {
     const summary = state.summary;
     if (!summary) return;
 
-    const pulse = Math.floor((Date.now() / 4000) % 3);
-    text("critical-cves", summary.criticalCves + (pulse === 0 ? 1 : 0));
-    text("active-exploits", summary.activeExploits + (pulse === 1 ? 1 : 0));
+    text("critical-cves", summary.criticalCves);
+    text("active-exploits", summary.activeExploits);
     text("threat-actors", summary.threatActors);
     text("victims", summary.victims);
     text("threat-score", liveThreatScore(summary.threatScore).toFixed(1));
     text("assessment-state", summary.assessment);
     text("assessment-score", `${liveThreatScore(summary.threatScore).toFixed(1)} / 10`);
     if (!state.aiSummary) {
-        text("assessment-copy", `${summary.activeExploits} exploited vulnerabilities, ${summary.victims} ransomware victims, and ${summary.activeAttacks} active global markers are influencing the current risk posture.`);
+        text("assessment-copy", `${summary.activeExploits} exploited vulnerabilities, ${summary.victims} ransomware victims, and ${summary.activeAttacks} global intelligence markers are in view. This is not proof of local compromise.`);
     }
-    text("feed-count", `${state.cves.length + state.ransomware.length + state.events.length} LIVE INTELLIGENCE FEEDS`);
+    const liveFeeds = state.feedStatus.filter(feed => displayState(feed) === "LIVE").length;
+    text("feed-count", `${liveFeeds}/${state.feedStatus.length || 0} FEEDS LIVE`);
 }
 
 function liveThreatScore(baseScore) {
@@ -160,26 +169,26 @@ function renderCves() {
     const container = document.getElementById("cve-feed");
     if (!container) return;
 
-    container.innerHTML = state.cves.map((cve, index) => `
+    container.innerHTML = state.cves.length ? state.cves.map((cve, index) => `
         <div class="table-row clickable" data-incident-type="cve" data-incident-index="${index}">
             <span class="row-title">${cve.id}</span>
             <span>${cve.vendor} - ${cve.product}</span>
             <span class="${severityClass(cve.severity)}">${Number(cve.cvss || 0).toFixed(1)}</span>
         </div>
-    `).join("");
+    `).join("") : emptyState("CVE FEED WAITING");
 }
 
 function renderRansomware() {
     const container = document.getElementById("ransomware-feed");
     if (!container) return;
 
-    container.innerHTML = state.ransomware.map((item, index) => `
+    container.innerHTML = state.ransomware.length ? state.ransomware.map((item, index) => `
         <div class="table-row clickable" data-incident-type="ransomware" data-incident-index="${index}">
             <span class="row-title">${item.victim}</span>
             <span class="red">${item.group}</span>
             <span class="badge">${item.country.slice(0, 2).toUpperCase()}</span>
         </div>
-    `).join("");
+    `).join("") : emptyState("NO VICTIM DATA");
 }
 
 function renderEvents() {
@@ -195,7 +204,7 @@ function renderEvents() {
         })),
     ].slice(0, 24);
 
-    container.innerHTML = combinedEvents.map((event, index) => {
+    container.innerHTML = combinedEvents.length ? combinedEvents.map((event, index) => {
         const date = new Date(event.createdAt);
         const time = Number.isNaN(date.getTime()) ? "--:--" : date.toLocaleTimeString([], { hour12: false });
         return `
@@ -204,7 +213,7 @@ function renderEvents() {
                 <span>${event.title}</span>
             </div>
         `;
-    }).join("");
+    }).join("") : emptyState("EVENT STREAM WAITING");
     state.combinedEvents = combinedEvents;
 }
 
@@ -251,13 +260,13 @@ function renderIndustries() {
     if (!container) return;
     const max = Math.max(...state.industries.map(item => item.count), 1);
 
-    container.innerHTML = state.industries.map(item => `
+    container.innerHTML = state.industries.length ? state.industries.map(item => `
         <div class="industry-item">
             <span>${item.name}</span>
             <strong>${item.count}</strong>
             <div class="bar"><span style="width:${(item.count / max) * 100}%"></span></div>
         </div>
-    `).join("");
+    `).join("") : emptyState("INDUSTRY DATA WAITING");
 }
 
 function formatRelativeTime(value) {
@@ -271,27 +280,106 @@ function formatRelativeTime(value) {
     return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+function formatTimestamp(value) {
+    if (!value) return "never";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "unknown";
+    return `${date.toISOString().replace("T", " ").replace(".000Z", " UTC")}`;
+}
+
+function displayState(feed) {
+    if (feed?.state) return feed.state;
+    if (feed?.status === "online") return "LIVE";
+    if (feed?.status === "fallback") return "FALLBACK";
+    return "OFFLINE";
+}
+
+function stateClass(feed) {
+    return displayState(feed).toLowerCase();
+}
+
+function feedByName(name) {
+    return state.feedStatus.find(feed => feed.name === name);
+}
+
+function freshnessText(feed) {
+    const state = displayState(feed);
+    const checked = `checked ${formatRelativeTime(feed.checkedAt)}`;
+    if (state === "LIVE") {
+        return `updated ${formatRelativeTime(feed.updatedAt || feed.lastSync)} · ${checked} · ${formatTimestamp(feed.updatedAt || feed.lastSync)}`;
+    }
+    if (state === "FALLBACK") return `fallback data · ${checked}`;
+    return `no live data · ${checked}`;
+}
+
+function renderPanelStatuses() {
+    const mappings = [
+        ["bgp-panel-status", "Cloudflare Radar"],
+        ["outage-panel-status", "Cloudflare Radar"],
+        ["solar-panel-status", "NOAA SWPC"],
+        ["backend-panel-status", "Cyberwatch Monitor"],
+        ["cve-panel-status", "CISA KEV"],
+        ["ransomware-panel-status", "Ransomware"],
+        ["event-panel-status", "Cyberwatch Monitor"],
+    ];
+    mappings.forEach(([id, name]) => {
+        const element = document.getElementById(id);
+        const feed = feedByName(name);
+        if (!element || !feed) return;
+        element.textContent = displayState(feed);
+        element.className = `panel-state ${stateClass(feed)}`;
+        element.title = freshnessText(feed);
+    });
+}
+
 function renderFeedStatus() {
     const container = document.getElementById("feed-status");
     if (!container) return;
 
-    container.innerHTML = state.feedStatus.map((feed, index) => `
+    container.innerHTML = state.feedStatus.length ? state.feedStatus.map((feed, index) => `
         <div class="feed-item clickable" data-incident-type="feed" data-incident-index="${index}">
             <div>
                 <strong>${feed.name}</strong>
                 <span>${feed.description}</span>
-                <small>${feed.records} records - ${formatRelativeTime(feed.lastSync)}</small>
+                <small>${feed.records} records · ${freshnessText(feed)}</small>
             </div>
-            <em class="feed-pill ${feed.status}">${feed.status}</em>
+            <em class="feed-pill ${stateClass(feed)}">${displayState(feed)}</em>
         </div>
-    `).join("");
+    `).join("") : emptyState("FEED STATUS WAITING");
+    renderPanelStatuses();
+}
+
+function renderSensorHealth() {
+    const health = state.opsHealth || {};
+    const sensor = health.sensors?.[0];
+    const heartbeat = sensor?.last_seen || sensor?.lastSeen;
+    const heartbeatAge = heartbeat ? Date.now() - new Date(heartbeat).getTime() : Infinity;
+    const sensorLive = Number.isFinite(heartbeatAge) && heartbeatAge <= 5 * 60 * 1000;
+    const localNodes = state.attacks.filter(item => item.sourceKind === "local_sensor").length * 2;
+    const globalNodes = state.attacks.filter(item => item.sourceKind !== "local_sensor").length * 2;
+    const dbState = health.database?.status === "online" ? "ONLINE" : "UNKNOWN";
+    const apiLatency = Number.isFinite(Number(health.apiLatencyMs)) ? `${health.apiLatencyMs} MS` : "UNKNOWN";
+
+    text("health-sensor-name", sensor?.source || sensor?.sensor_id || "NO SENSOR");
+    text("health-last-seen", heartbeat ? formatRelativeTime(heartbeat) : "NEVER");
+    text("health-event-count", sensor?.event_count ?? sensor?.eventCount ?? 0);
+    text("health-local-count", localNodes);
+    text("health-global-count", globalNodes);
+    text("health-api-state", `${dbState} · ${apiLatency}`);
+
+    const status = document.getElementById("sensor-health-status");
+    if (status) {
+        status.textContent = sensorLive ? "LIVE" : "OFFLINE";
+        status.className = `panel-state ${sensorLive ? "live" : "offline"}`;
+        status.title = heartbeat ? `Last heartbeat ${formatTimestamp(heartbeat)}` : "No sensor heartbeat received";
+    }
 }
 
 function renderAlerts() {
     const container = document.getElementById("alert-list");
     if (!container) return;
 
-    container.innerHTML = state.alerts.map((alert, index) => `
+    container.innerHTML = state.alerts.length ? state.alerts.map((alert, index) => `
         <div class="alert-item clickable" data-incident-type="alert" data-incident-index="${index}">
             <div>
                 <strong>${alert.title}</strong>
@@ -299,7 +387,68 @@ function renderAlerts() {
             </div>
             <em class="alert-severity ${alert.severity}">${alert.severity}</em>
         </div>
+    `).join("") : emptyState("NO ACTIVE RULES");
+}
+
+function renderAssets() {
+    const container = document.getElementById("asset-list");
+    if (!container) return;
+    text("asset-count", `${state.assets.length} ASSETS`);
+    if (!state.assets.length) {
+        container.innerHTML = '<small class="asset-empty">NO ASSETS REGISTERED</small>';
+        return;
+    }
+    container.innerHTML = state.assets.slice(0, 8).map(asset => `
+        <div class="asset-item">
+            <div>
+                <strong>${asset.name}</strong>
+                <span>${asset.asset_type.replaceAll("_", " ")} · ${asset.ip_address || asset.domain || "no address"}</span>
+            </div>
+            <em class="asset-criticality ${asset.criticality}">${asset.criticality}</em>
+        </div>
     `).join("");
+}
+
+function renderIncidents() {
+    const container = document.getElementById("incident-list");
+    if (!container) return;
+    if (!state.incidents.length) {
+        container.innerHTML = `
+            <div class="incident-empty">
+                <strong>NO LOCAL INCIDENTS</strong>
+                <span>Awaiting correlated sensor evidence</span>
+                <small>SURICATA · ZEEK · WAZUH · SYSLOG</small>
+            </div>
+        `;
+        return;
+    }
+    container.innerHTML = state.incidents.slice(0, 6).map((incident, index) => `
+        <div class="incident-item clickable" data-incident-type="incident" data-incident-index="${index}">
+            <div>
+                <strong>${incident.title}</strong>
+                <span>${incident.event_count} events · ${incident.technique_id || "unclassified"} · ${incident.confidence}% confidence</span>
+                <small>${formatRelativeTime(incident.last_seen)} · ${incident.source_ip || "unknown source"}</small>
+            </div>
+            <em class="incident-severity ${incident.severity}">${incident.severity}</em>
+        </div>
+    `).join("");
+}
+
+async function registerAsset(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    const response = await fetch("/api/assets", {
+        method: "POST",
+        headers: mutationHeaders(),
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Asset registration failed");
+    }
+    form.reset();
+    await loadDashboard();
 }
 
 function renderAiSummary() {
@@ -345,6 +494,11 @@ function incidentActions(type) {
             "Correlate with asset exposure and current patch status.",
             "Escalate if the rule remains active after refresh.",
         ],
+        incident: [
+            "Validate the evidence against the affected asset.",
+            "Review related endpoint and network logs.",
+            "Contain or block only after analyst confirmation.",
+        ],
     };
     return actions[type] || actions.event;
 }
@@ -355,20 +509,31 @@ function openIncidentDrawer(type, item) {
 
     const title = item.id || item.victim || item.title || item.name || "Incident";
     const severity = item.severity || item.status || "info";
-    const source = item.source || item.vendor || item.group || item.name || "Cyberwatch";
-    const description = item.description || item.title || item.product || item.description || "No description available.";
+    const source = item.source || item.source_ip || item.vendor || item.group || item.name || "Cyberwatch";
+    const description = item.summary || item.description || item.title || item.product || "No description available.";
 
     text("drawer-type", type.toUpperCase());
     text("drawer-title", title);
     text("drawer-description", description);
+    state.activeIncidentId = type === "incident" ? item.id : null;
+
+    const controls = document.getElementById("incident-controls");
+    if (controls) controls.hidden = type !== "incident";
 
     const meta = document.getElementById("drawer-meta");
     if (meta) {
+        const network = item.enrichment?.source || {};
+        const abuse = network.abuse || {};
         const metaItems = [
             ["Source", source],
+            ["Scope", item.scope || (item.sourceKind === "local_sensor" ? "LOCAL DETECTION" : "GLOBAL INTELLIGENCE")],
             ["Severity", String(severity).toUpperCase()],
-            ["Records", item.records ?? item.cvss ?? item.country ?? "n/a"],
-            ["Last Seen", formatRelativeTime(item.createdAt || item.published || item.discovered || item.lastSync)],
+            ["Confidence", item.confidence ? `${item.confidence}%` : (item.records ?? item.cvss ?? item.country ?? "n/a")],
+            ["Technique", item.technique_id ? `${item.technique_id} ${item.technique_name || ""}` : "n/a"],
+            ["Geo", network.country && network.country !== "Unknown" ? `${network.country} (${network.locationSource || "unknown"})` : "unavailable"],
+            ["ASN / ISP", network.asn || network.isp || "unavailable"],
+            ["Abuse", abuse.status === "checked" ? `${abuse.score ?? 0} / 100` : (abuse.status || "unavailable")],
+            ["Last Seen", formatRelativeTime(item.last_seen || item.createdAt || item.published || item.discovered || item.lastSync)],
         ];
         meta.innerHTML = metaItems.map(([label, value]) => `
             <div><span>${label}</span><strong>${value}</strong></div>
@@ -377,14 +542,150 @@ function openIncidentDrawer(type, item) {
 
     const actions = document.getElementById("drawer-actions");
     if (actions) {
-        const actionItems = item.recommendation
-            ? [item.recommendation, ...incidentActions(type).slice(0, 2)]
+        const recommendations = Array.isArray(item.recommendations) ? item.recommendations : [];
+        const actionItems = recommendations.length
+            ? recommendations
+            : item.recommendation
+                ? [item.recommendation, ...incidentActions(type).slice(0, 2)]
             : incidentActions(type);
         actions.innerHTML = actionItems.map(action => `<li>${action}</li>`).join("");
     }
 
+    const evidence = document.getElementById("drawer-evidence");
+    if (evidence) {
+        evidence.innerHTML = (Array.isArray(item.evidence) ? item.evidence : ["Evidence is collected from the connected feed."])
+            .map(entry => `<li>${entry}</li>`).join("");
+    }
+
+    if (type === "incident") {
+        populateIncidentControls(item);
+        loadIncidentDetail(item.id).catch(error => console.error("Incident detail load failed", error));
+    }
+
     drawer.classList.add("open");
     drawer.setAttribute("aria-hidden", "false");
+}
+
+function populateIncidentControls(item) {
+    const status = document.getElementById("incident-status");
+    const assigned = document.getElementById("incident-assigned");
+    const notes = document.getElementById("incident-notes");
+    const closure = document.getElementById("incident-closure");
+    if (status) status.value = item.status || "new";
+    if (assigned) assigned.value = item.assigned_to || "";
+    if (notes) notes.value = item.notes || "";
+    if (closure) closure.value = item.closure_reason || "";
+    renderIncidentActivity(item);
+}
+
+function renderIncidentActivity(item) {
+    const comments = document.getElementById("incident-comments");
+    const timeline = document.getElementById("incident-timeline");
+    if (comments) comments.innerHTML = (item.comments || []).map(comment =>
+        `<div class="activity-item"><strong>${comment.author}</strong><span>${formatRelativeTime(comment.createdAt)}</span><p>${comment.body}</p></div>`
+    ).join("") || `<div class="activity-empty">No analyst comments.</div>`;
+    if (timeline) timeline.innerHTML = (item.timeline || []).map(event =>
+        `<div class="activity-item"><strong>${event.type.replaceAll("_", " ")}</strong><span>${formatRelativeTime(event.createdAt)}</span><p>${event.message}</p></div>`
+    ).join("") || `<div class="activity-empty">No timeline entries.</div>`;
+    const ai = document.getElementById("incident-ai-result");
+    if (ai) {
+        const result = item.ai_analysis || {};
+        ai.innerHTML = result.conclusion
+            ? `<strong>${result.assessment || "AI ANALYSIS"}</strong><p>${result.conclusion}</p><small>Provider: ${result.provider || "unknown"} · Confidence: ${result.confidence}% · Evidence: ${(result.evidenceReferences || []).join(", ") || "none"}</small>`
+            : "";
+    }
+    const actions = document.getElementById("response-action-list");
+    if (actions) actions.innerHTML = (item.responseActions || []).map(action =>
+        `<div class="activity-item"><strong>${action.action_type}</strong><span>${action.status}</span><p>${action.target} · ${action.requested_by}</p>${action.status === "pending_approval" ? `<button type="button" data-approve-action="${action.id}">APPROVE</button>` : ""}</div>`
+    ).join("") || `<div class="activity-empty">No response actions requested.</div>`;
+}
+
+async function loadIncidentDetail(id) {
+    const detail = await getJson(`/api/incidents/${id}`);
+    const index = state.incidents.findIndex(item => item.id === id);
+    if (index >= 0) state.incidents[index] = detail;
+    if (state.activeIncidentId === id) populateIncidentControls(detail);
+}
+
+async function saveIncident() {
+    if (!state.activeIncidentId) return;
+    const payload = {
+        status: document.getElementById("incident-status")?.value,
+        assigned_to: document.getElementById("incident-assigned")?.value,
+        notes: document.getElementById("incident-notes")?.value,
+        closure_reason: document.getElementById("incident-closure")?.value,
+    };
+    const response = await fetch(`/api/incidents/${state.activeIncidentId}`, {
+        method: "PATCH", headers: mutationHeaders(), body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error((await response.json()).error || "Incident update failed");
+    const detail = await response.json();
+    const index = state.incidents.findIndex(item => item.id === detail.id);
+    if (index >= 0) state.incidents[index] = detail;
+    populateIncidentControls(detail);
+    renderIncidents();
+}
+
+async function addIncidentComment() {
+    if (!state.activeIncidentId) return;
+    const input = document.getElementById("incident-comment-input");
+    const body = input?.value.trim();
+    if (!body) return;
+    const response = await fetch(`/api/incidents/${state.activeIncidentId}/comments`, {
+        method: "POST", headers: mutationHeaders(), body: JSON.stringify({ body, author: "analyst" }),
+    });
+    if (!response.ok) throw new Error((await response.json()).error || "Comment failed");
+    input.value = "";
+    const detail = await response.json();
+    const index = state.incidents.findIndex(item => item.id === detail.id);
+    if (index >= 0) state.incidents[index] = detail;
+    populateIncidentControls(detail);
+}
+
+async function runIncidentAi() {
+    if (!state.activeIncidentId) return;
+    const response = await fetch(`/api/incidents/${state.activeIncidentId}/ai-analysis`, { method: "POST", headers: mutationHeaders() });
+    if (!response.ok) throw new Error("AI analysis failed");
+    const result = await response.json();
+    const incident = state.incidents.find(item => item.id === state.activeIncidentId);
+    if (incident) { incident.ai_analysis = result; renderIncidentActivity(incident); }
+}
+
+async function notifyIncident() {
+    if (!state.activeIncidentId) return;
+    const response = await fetch(`/api/incidents/${state.activeIncidentId}/notify`, { method: "POST", headers: mutationHeaders() });
+    if (!response.ok) throw new Error("Alert delivery failed");
+    const detail = await getJson(`/api/incidents/${state.activeIncidentId}`);
+    const index = state.incidents.findIndex(item => item.id === detail.id);
+    if (index >= 0) state.incidents[index] = detail;
+    populateIncidentControls(detail);
+}
+
+async function requestResponseAction() {
+    if (!state.activeIncidentId) return;
+    const target = document.getElementById("response-action-target")?.value.trim();
+    if (!target) return;
+    const response = await fetch(`/api/incidents/${state.activeIncidentId}/response-actions`, {
+        method: "POST", headers: mutationHeaders(),
+        body: JSON.stringify({ action_type: document.getElementById("response-action-type")?.value, target, requested_by: "analyst" }),
+    });
+    if (!response.ok) throw new Error((await response.json()).error || "Response request failed");
+    document.getElementById("response-action-target").value = "";
+    const detail = await getJson(`/api/incidents/${state.activeIncidentId}`);
+    const index = state.incidents.findIndex(item => item.id === detail.id);
+    if (index >= 0) state.incidents[index] = detail;
+    populateIncidentControls(detail);
+}
+
+async function approveResponseAction(actionId) {
+    const response = await fetch(`/api/response-actions/${actionId}/approve`, {
+        method: "POST", headers: mutationHeaders(), body: JSON.stringify({ approved_by: "analyst" }),
+    });
+    if (!response.ok) throw new Error((await response.json()).error || "Approval failed");
+    const detail = await getJson(`/api/incidents/${state.activeIncidentId}`);
+    const index = state.incidents.findIndex(item => item.id === detail.id);
+    if (index >= 0) state.incidents[index] = detail;
+    populateIncidentControls(detail);
 }
 
 function closeIncidentDrawer() {
@@ -406,6 +707,7 @@ function handleIncidentClick(event) {
         event: state.combinedEvents || state.events,
         feed: state.feedStatus,
         alert: state.alerts,
+        incident: state.incidents,
     };
     openIncidentDrawer(type, collections[type]?.[index]);
 }
@@ -432,16 +734,22 @@ function renderRiskRings() {
     `).join("");
 }
 
-function threatColor(type) {
-    const colors = {
-        ransomware: "#ff4747",
-        outage: "#ffb21a",
-        hijack: "#9b5cff",
-        scan: "#3f83ff",
-        exploit: "#23ce73",
-        eq: "#23ce73",
-    };
-    return colors[String(type || "").toLowerCase()] || "#55baff";
+function threatColor(type, severity) {
+    const value = String(type || "").toLowerCase();
+    if (value.includes("ransom") || value.includes("malware")) return "#ff4747";
+    if (value.includes("outage") || value.includes("power")) return "#ffb21a";
+    if (value.includes("hijack") || value.includes("bgp")) return "#9b5cff";
+    if (value.includes("mdns")) return "#9b5cff";
+    if (value.includes("dns")) return "#55baff";
+    if (value.includes("flow") || value.includes("conn")) return "#3f83ff";
+    if (value.includes("scan") || value.includes("recon") || value.includes("probe")) return "#3f83ff";
+    if (value.includes("exploit") || value.includes("cve") || value.includes("kev") || value.includes("intrusion") || value.includes("endpoint") || value.includes("zeek")) return "#23ce73";
+    const level = String(severity || "").toLowerCase();
+    if (level.includes("critical")) return "#ff4747";
+    if (level.includes("high")) return "#ffb21a";
+    if (level.includes("medium")) return "#3f83ff";
+    if (level.includes("low") || level.includes("info")) return "#23ce73";
+    return "#55baff";
 }
 
 function projectGlobePoint(lat, lng, radius, rotation) {
@@ -502,21 +810,28 @@ function renderGlobe() {
             lat: attack.sourceLat,
             lng: attack.sourceLng,
             type: attack.category,
-            color: threatColor(attack.category),
+            color: threatColor(attack.category, attack.severity),
             born: Date.now() - Math.random() * 3000,
             life: 9000 + Math.random() * 6000,
             arc: attack,
+            sourceKind: attack.sourceKind || "global_intelligence",
         },
         {
             lat: attack.targetLat,
             lng: attack.targetLng,
             type: attack.category,
-            color: threatColor(attack.category),
+            color: threatColor(attack.category, attack.severity),
             born: Date.now() - Math.random() * 3000,
             life: 9000 + Math.random() * 6000,
             arc: attack,
+            sourceKind: attack.sourceKind || "global_intelligence",
         },
     ]);
+
+    const localCount = state.liveThreats.filter(threat => threat.sourceKind === "local_sensor").length;
+    const globalCount = state.liveThreats.length - localCount;
+    text("local-node-count", localCount);
+    text("global-node-count", globalCount);
 }
 
 function updateGlobeFrame() {
@@ -600,20 +915,31 @@ function updateGlobeFrame() {
         }
 
         const p = projectGlobePoint(threat.lat, threat.lng, radius, state.rotation);
-        if (p.z < 0) return;
+        const isFrontSide = p.z >= 0;
 
         const opacity = Math.max(0.18, 1 - age / threat.life);
         const pulse = 0.5 + 0.5 * Math.sin(now / 180);
-        ctx.globalAlpha = opacity;
+        const depthOpacity = isFrontSide ? 1 : 0.2;
+        ctx.globalAlpha = opacity * depthOpacity;
+        const isLocalSensor = threat.sourceKind === "local_sensor";
         ctx.fillStyle = threat.color;
         ctx.beginPath();
-        ctx.arc(centerX + p.x, centerY - p.y, 3.2, 0, Math.PI * 2);
+        ctx.arc(centerX + p.x, centerY - p.y, isFrontSide ? (isLocalSensor ? 4.5 : 3.2) : 2.1, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.globalAlpha = opacity * 0.42;
+        if (isLocalSensor && isFrontSide) {
+            ctx.globalAlpha = opacity * 0.9;
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.arc(centerX + p.x, centerY - p.y, 6.5, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        ctx.globalAlpha = opacity * depthOpacity * 0.42;
         ctx.strokeStyle = threat.color;
         ctx.beginPath();
-        ctx.arc(centerX + p.x, centerY - p.y, 7 + pulse * 5, 0, Math.PI * 2);
+        ctx.arc(centerX + p.x, centerY - p.y, isFrontSide ? 7 + pulse * 5 : 3.5, 0, Math.PI * 2);
         ctx.stroke();
         ctx.globalAlpha = 1;
     });
@@ -635,11 +961,18 @@ function animateGlobe() {
 }
 
 function updateLiveTelemetry() {
-    const t = Date.now();
-    text("solar-wind", `${Math.round(383 + Math.sin(t / 2300) * 18)} km/s`);
-    text("solar-density", `${(9.6 + Math.sin(t / 3100) * 0.9).toFixed(1)} /cc`);
-    text("solar-bt", `${(10.2 + Math.cos(t / 2700) * 1.4).toFixed(1)} nT`);
-    text("solar-kp", `${(3.7 + Math.sin(t / 4500) * 0.5).toFixed(1)}`);
+    const solar = state.liveFeeds?.solar;
+    if (solar) {
+        text("solar-wind", `${solar.windSpeed} km/s`);
+        text("solar-density", `${solar.density} /cc`);
+        text("solar-bt", `${solar.bt} nT`);
+        text("solar-kp", `${solar.kp}`);
+        text("solar-freshness", solar.updatedAt
+            ? `OBSERVED ${formatTimestamp(solar.updatedAt)} · checked ${formatRelativeTime(solar.checkedAt)}`
+            : `NO LIVE OBSERVATION · checked ${formatRelativeTime(solar.checkedAt)}`);
+    }
+    drawLiveCharts();
+    renderFeedStatus();
     renderSummary();
 }
 
@@ -673,6 +1006,17 @@ function drawTrend() {
 
     ctx.beginPath();
     points.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
+    ctx.lineTo(points[points.length - 1].x, height - padding);
+    ctx.lineTo(points[0].x, height - padding);
+    ctx.closePath();
+    const area = ctx.createLinearGradient(0, padding, 0, height - padding);
+    area.addColorStop(0, "rgba(85, 186, 255, 0.22)");
+    area.addColorStop(1, "rgba(85, 186, 255, 0)");
+    ctx.fillStyle = area;
+    ctx.fill();
+
+    ctx.beginPath();
+    points.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
     ctx.strokeStyle = "#55baff";
     ctx.lineWidth = 3;
     ctx.stroke();
@@ -689,23 +1033,102 @@ function drawTrend() {
         ctx.font = "12px Courier New";
         ctx.fillText(point.item.day, point.x - 12, height - 8);
     });
+
+    const latest = points[points.length - 1];
+    ctx.fillStyle = "#55baff";
+    ctx.beginPath();
+    ctx.arc(latest.x, latest.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawMiniChart(id, values, color) {
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.strokeStyle = "rgba(85, 186, 255, 0.12)";
+    ctx.beginPath();
+    ctx.moveTo(0, height - 16);
+    ctx.lineTo(width, height - 16);
+    ctx.stroke();
+    if (!values.length) {
+        ctx.fillStyle = "#52627a";
+        ctx.font = "10px Courier New";
+        ctx.fillText("NO OBSERVATION", 8, height / 2);
+        return;
+    }
+    const min = Math.min(...values);
+    const max = Math.max(...values, min + 1);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    values.forEach((value, index) => {
+        const x = values.length === 1 ? width / 2 : (width / (values.length - 1)) * index;
+        const y = height - 18 - ((value - min) / (max - min)) * (height - 30);
+        if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.lineTo(width, height - 16);
+    ctx.lineTo(0, height - 16);
+    ctx.closePath();
+    const area = ctx.createLinearGradient(0, 0, 0, height);
+    area.addColorStop(0, `${color}33`);
+    area.addColorStop(1, `${color}00`);
+    ctx.fillStyle = area;
+    ctx.fill();
+
+    ctx.beginPath();
+    values.forEach((value, index) => {
+        const x = values.length === 1 ? width / 2 : (width / (values.length - 1)) * index;
+        const y = height - 18 - ((value - min) / (max - min)) * (height - 30);
+        if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    const lastValue = values[values.length - 1];
+    const lastX = values.length === 1 ? width / 2 : width;
+    const lastY = height - 18 - ((lastValue - min) / (max - min)) * (height - 30);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawLiveCharts() {
+    const wind = Number(state.liveFeeds?.solar?.windSpeed);
+    if (Number.isFinite(wind)) {
+        state.telemetryHistory.push(wind);
+        state.telemetryHistory = state.telemetryHistory.slice(-36);
+        text("solar-chart-value", `${wind} km/s`);
+    }
+    const activity = state.attacks.length + state.incidents.length;
+    state.sensorHistory.push(activity);
+    state.sensorHistory = state.sensorHistory.slice(-36);
+    text("sensor-chart-value", `${activity} signals`);
+    drawMiniChart("solar-chart", state.telemetryHistory, "#ffb21a");
+    drawMiniChart("sensor-chart", state.sensorHistory, "#55baff");
 }
 
 async function loadDashboard() {
-    const [summary, trend, cves, ransomware, attacks, events, industries, feedStatus, aiSummary, alerts] = await Promise.all([
-        getJson("/api/summary"),
-        getJson("/api/threat-trend"),
-        getJson("/api/cves"),
-        getJson("/api/ransomware"),
-        getJson("/api/attacks"),
-        getJson("/api/events"),
-        getJson("/api/industries"),
-        getJson("/api/feed-status"),
-        getJson("/api/ai-summary"),
-        getJson("/api/alerts"),
+    const [summary, trend, cves, ransomware, attacks, events, industries, feedStatus, aiSummary, alerts, liveFeeds, assets, incidents, opsHealth] = await Promise.all([
+        safeJson("/api/summary", { criticalCves: 0, activeExploits: 0, threatActors: 0, victims: 0, activeAttacks: 0, threatScore: 0, assessment: "WAITING" }),
+        safeJson("/api/threat-trend", []),
+        safeJson("/api/cves", []),
+        safeJson("/api/ransomware", []),
+        safeJson("/api/attacks", []),
+        safeJson("/api/events", []),
+        safeJson("/api/industries", []),
+        safeJson("/api/feed-status", []),
+        safeJson("/api/ai-summary", { posture: "Waiting for intelligence", score: 0, assessment: "WAITING", drivers: [], actions: [] }),
+        safeJson("/api/alerts", []),
+        safeJson("/api/live-feeds", { solar: null, bgp: { items: [] }, outages: { items: [] } }),
+        safeJson("/api/assets", []),
+        safeJson("/api/incidents", []),
+        safeJson("/api/ops/health", { status: "degraded", database: { status: "unknown" }, sensors: [] }),
     ]);
 
-    Object.assign(state, { summary, trend, cves, ransomware, attacks, events, industries, feedStatus, aiSummary, alerts });
+    Object.assign(state, { summary, trend, cves, ransomware, attacks, events, industries, feedStatus, aiSummary, alerts, liveFeeds, assets, incidents, opsHealth });
     renderSummary();
     renderCves();
     renderRansomware();
@@ -713,9 +1136,13 @@ async function loadDashboard() {
     renderIndustries();
     renderFeedStatus();
     renderAlerts();
+    renderAssets();
+    renderIncidents();
+    renderLiveFeedTables();
     renderAiSummary();
     renderRiskRings();
     renderGlobe();
+    renderSensorHealth();
     drawTrend();
 }
 
@@ -723,7 +1150,7 @@ async function refreshFeeds() {
     const button = document.getElementById("refresh-button");
     if (button) button.textContent = "SYNCING";
     try {
-        await fetch("/api/refresh", { method: "POST" });
+        await fetch("/api/refresh", { method: "POST", headers: mutationHeaders() });
         await loadDashboard();
     } finally {
         if (button) button.textContent = "REFRESH";
@@ -733,7 +1160,6 @@ async function refreshFeeds() {
 window.addEventListener("resize", drawTrend);
 document.addEventListener("DOMContentLoaded", () => {
     renderClocks();
-    renderStaticTables();
     loadDashboard().catch(error => console.error("Dashboard load failed", error));
     startEventStream();
     animateGlobe();
@@ -745,6 +1171,16 @@ document.addEventListener("DOMContentLoaded", () => {
     setInterval(() => loadDashboard().catch(console.error), 30000);
     setInterval(() => refreshFeeds().catch(console.error), 120000);
     document.getElementById("refresh-button")?.addEventListener("click", refreshFeeds);
+    document.getElementById("asset-form")?.addEventListener("submit", event => registerAsset(event).catch(console.error));
     document.body.addEventListener("click", handleIncidentClick);
     document.getElementById("drawer-close")?.addEventListener("click", closeIncidentDrawer);
+    document.getElementById("incident-save")?.addEventListener("click", () => saveIncident().catch(console.error));
+    document.getElementById("incident-comment-submit")?.addEventListener("click", () => addIncidentComment().catch(console.error));
+    document.getElementById("incident-ai")?.addEventListener("click", () => runIncidentAi().catch(console.error));
+    document.getElementById("incident-notify")?.addEventListener("click", () => notifyIncident().catch(console.error));
+    document.getElementById("response-action-submit")?.addEventListener("click", () => requestResponseAction().catch(console.error));
+    document.body.addEventListener("click", event => {
+        const action = event.target.closest("[data-approve-action]");
+        if (action) approveResponseAction(action.dataset.approveAction).catch(console.error);
+    });
 });

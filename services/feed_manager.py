@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 from database.db import get_connection
 from intelligence.cve.nvd_feed import get_cisa_kev_cves, get_latest_cves
 from intelligence.malware.urlhaus_feed import get_recent_urlhaus_events
+from intelligence.outages.cloudflare_feed import get_bgp_hijacks, get_outages
 from intelligence.ransomware.ransomware_feed import get_victims
+from intelligence.space_weather.noaa_feed import get_solar_wind
 
 
 SEED_ATTACKS = [
@@ -282,6 +284,8 @@ def get_ransomware_from_db(limit=10):
 
 
 def get_attacks_from_db(limit=24):
+    sensor_limit = max(8, limit // 2)
+    sensor_cutoff = _utc_now() - timedelta(hours=24)
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -289,16 +293,35 @@ def get_attacks_from_db(limit=24):
         SELECT source_country AS source, target_country AS target,
                source_lat AS sourceLat, source_lng AS sourceLng,
                target_lat AS targetLat, target_lng AS targetLng,
-               category, severity, created_at AS createdAt
+               category, severity, created_at AS createdAt, source_ip, target_ip
         FROM attacks
         ORDER BY id DESC
         LIMIT ?
         """,
-        (limit,),
+        (max(limit * 10, 100),),
     )
-    rows = cursor.fetchall()
+    raw_rows = cursor.fetchall()
     conn.close()
-    attacks = [_row_to_dict(row) for row in rows]
+    rows = []
+    for row in raw_rows:
+        item = _row_to_dict(row)
+        if item.get("source_ip"):
+            try:
+                created_at = datetime.fromisoformat(str(item.get("createdAt", "")).replace("Z", "+00:00"))
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                if created_at.astimezone(timezone.utc) < sensor_cutoff:
+                    continue
+            except ValueError:
+                continue
+        rows.append(item)
+        if len(rows) >= sensor_limit:
+            break
+
+    attacks = rows
+    for attack in attacks:
+        attack["sourceKind"] = "local_sensor" if attack.get("source_ip") else "global_intelligence"
+        attack["scope"] = "local detection" if attack["sourceKind"] == "local_sensor" else "global intelligence"
 
     for victim in get_ransomware_from_db(10):
         source_country = THREAT_SOURCE_COUNTRIES["ransomware"]
@@ -315,6 +338,8 @@ def get_attacks_from_db(limit=24):
             "category": "Ransomware",
             "severity": "high",
             "createdAt": victim.get("discovered"),
+            "sourceKind": "global_intelligence",
+            "scope": "external ransomware intelligence",
         })
 
     for cve in get_cves_from_db(10):
@@ -329,9 +354,11 @@ def get_attacks_from_db(limit=24):
             "sourceLng": source_lng,
             "targetLat": target_lat,
             "targetLng": target_lng,
-            "category": "Exploit" if cve.get("exploited") else "Scan",
+            "category": "KEV intelligence" if cve.get("exploited") else "CVE intelligence",
             "severity": cve.get("severity", "medium").lower(),
             "createdAt": cve.get("published"),
+            "sourceKind": "global_intelligence",
+            "scope": "vulnerability intelligence; not asset exploitation",
         })
 
     for event in get_events(10):
@@ -351,6 +378,8 @@ def get_attacks_from_db(limit=24):
             "category": event["type"].title(),
             "severity": event.get("severity", "medium"),
             "createdAt": event.get("createdAt"),
+            "sourceKind": "global_intelligence",
+            "scope": "external malware intelligence",
         })
 
     return attacks[:limit]
@@ -373,6 +402,26 @@ def get_events(limit=20):
     return [_row_to_dict(row) for row in rows]
 
 
+def _feed_entry(name, status, records, last_sync, description, checked_at=None, updated_at=None):
+    state = {
+        "online": "LIVE",
+        "fallback": "FALLBACK",
+        "token_required": "OFFLINE",
+        "waiting": "OFFLINE",
+        "quiet": "OFFLINE",
+    }.get(status, "OFFLINE")
+    return {
+        "name": name,
+        "status": status,
+        "state": state,
+        "records": records,
+        "lastSync": last_sync,
+        "checkedAt": checked_at or _utc_now().isoformat(),
+        "updatedAt": updated_at,
+        "description": description,
+    }
+
+
 def get_feed_status():
     conn = get_connection()
     cursor = conn.cursor()
@@ -392,45 +441,34 @@ def get_feed_status():
     cursor.execute("SELECT created_at FROM events WHERE event_type = 'feed' ORDER BY id DESC LIMIT 1")
     latest_refresh = cursor.fetchone()
 
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS count, MAX(created_at) AS last_sync
+        FROM events
+        WHERE (source LIKE '%Sensor%' OR source LIKE '%Suricata%' OR event_type = 'sensor')
+          AND title != 'Elevated scanning for exposed management panels'
+        """
+    )
+    sensor = cursor.fetchone()
+
     conn.close()
 
     last_sync = latest_refresh["created_at"] if latest_refresh else None
+    solar = get_solar_wind()
+    bgp = get_bgp_hijacks()
+    outages = get_outages()
+    cloudflare_status = "online" if bgp["status"] == "online" or outages["status"] == "online" else bgp["status"]
+    cloudflare_checked = max(bgp.get("checkedAt", ""), outages.get("checkedAt", "")) or _utc_now().isoformat()
+    cloudflare_updated = max(bgp.get("updatedAt") or "", outages.get("updatedAt") or "") or None
     return [
-        {
-            "name": "CISA KEV",
-            "status": "online" if cve_count else "waiting",
-            "records": cve_count,
-            "lastSync": last_sync,
-            "description": "Known exploited vulnerabilities",
-        },
-        {
-            "name": "NVD CVE",
-            "status": "online" if cve_count else "waiting",
-            "records": cve_count,
-            "lastSync": last_sync,
-            "description": "Recent vulnerability intelligence",
-        },
-        {
-            "name": "URLhaus",
-            "status": "online" if malware_count else "quiet",
-            "records": malware_count,
-            "lastSync": last_sync,
-            "description": "Malware URL reports",
-        },
-        {
-            "name": "Ransomware",
-            "status": "online" if ransomware_count else "waiting",
-            "records": ransomware_count,
-            "lastSync": last_sync,
-            "description": "Victim and group intelligence",
-        },
-        {
-            "name": "Cyberwatch Monitor",
-            "status": "online" if refresh_count else "waiting",
-            "records": refresh_count,
-            "lastSync": last_sync,
-            "description": "Backend refresh/event stream",
-        },
+        _feed_entry("CISA KEV", "online" if cve_count else "waiting", cve_count, last_sync, "Known exploited vulnerabilities", last_sync, last_sync),
+        _feed_entry("NVD CVE", "online" if cve_count else "waiting", cve_count, last_sync, "Recent vulnerability intelligence", last_sync, last_sync),
+        _feed_entry("URLhaus", "online" if malware_count else "quiet", malware_count, last_sync, "Malware URL reports", last_sync, last_sync if malware_count else None),
+        _feed_entry("Ransomware", "online" if ransomware_count else "waiting", ransomware_count, last_sync, "Victim and group intelligence", last_sync, last_sync),
+        _feed_entry("Cyberwatch Monitor", "online" if refresh_count else "waiting", refresh_count, last_sync, "Backend refresh/event stream", last_sync, last_sync),
+        _feed_entry("NOAA SWPC", solar["status"], 1, solar.get("updatedAt"), "Solar wind and planetary K-index", solar.get("checkedAt"), solar.get("updatedAt")),
+        _feed_entry("Cloudflare Radar", cloudflare_status, len(bgp["items"]) + len(outages["items"]), cloudflare_updated, "BGP hijack/outage telemetry; token improves live coverage", cloudflare_checked, cloudflare_updated),
+        _feed_entry("Cyberwatch Sensor", "online" if sensor["count"] else "waiting", sensor["count"], sensor["last_sync"], "Authenticated network detections from Suricata or a local sensor", _utc_now().isoformat(), sensor["last_sync"]),
     ]
 
 
@@ -452,6 +490,7 @@ def get_summary():
         "activeAttacks": len(attacks),
         "threatScore": threat_score,
         "assessment": "HIGH" if threat_score >= 7 else "ELEVATED",
+        "scope": "global intelligence posture; not proof of local compromise",
     }
 
 
@@ -460,6 +499,8 @@ def get_ai_summary():
     cves = get_cves_from_db(5)
     events = get_events(5)
     ransomware = get_ransomware_from_db(5)
+    from services.incident_analyzer import get_incidents
+    local_incidents = get_incidents(10)
 
     top_cve = cves[0] if cves else None
     latest_event = events[0] if events else None
@@ -493,6 +534,9 @@ def get_ai_summary():
         "drivers": drivers,
         "actions": actions,
         "generatedAt": _utc_now().isoformat(),
+        "scope": "global intelligence posture with local sensor context",
+        "localEvidenceAvailable": bool(local_incidents),
+        "localIncidentCount": len(local_incidents),
     }
 
 
@@ -583,3 +627,11 @@ def get_top_industries():
     for sector, count in defaults:
         counts.setdefault(sector, count)
     return [{"name": sector, "count": count} for sector, count in counts.most_common(6)]
+
+
+def get_live_feeds():
+    return {
+        "solar": get_solar_wind(),
+        "bgp": get_bgp_hijacks(),
+        "outages": get_outages(),
+    }

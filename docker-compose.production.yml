@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cyberwatch}
+      POSTGRES_USER: ${POSTGRES_USER:-cyberwatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - cyberwatch-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - cyberwatch-redis:/data
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cyberwatch}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-cyberwatch}
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_BACKEND: redis
+      HOST: 0.0.0.0
+      PORT: 5050
+      FLASK_ENV: production
+      FLASK_DEBUG: 0
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD}
+      SENSOR_INGEST_TOKEN: ${SENSOR_INGEST_TOKEN:?Set SENSOR_INGEST_TOKEN}
+    ports:
+      - "${CYBERWATCH_PORT:-5050}:5050"
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["python", "tools/worker.py"]
+    depends_on:
+      redis:
+        condition: service_started
+    environment:
+      REDIS_URL: redis://redis:6379/0
+
+volumes:
+  cyberwatch-postgres:
+  cyberwatch-redis:
