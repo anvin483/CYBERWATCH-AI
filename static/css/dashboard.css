@@ -162,6 +162,21 @@ body {
     text-align: right;
 }
 
+.logout-link {
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    padding: 6px 8px;
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-decoration: none;
+}
+
+.logout-link:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+
 .time-grid span {
     display: block;
     color: var(--muted);
