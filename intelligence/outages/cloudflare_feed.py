@@ -34,7 +34,7 @@ def _result(status, items):
 
 
 def _headers():
-    token = os.environ.get("CLOUDFLARE_API_TOKEN")
+    token = (os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CLOUDFLARE_RADAR_API_TOKEN", "")).strip()
     if not token:
         return None
     return {"Authorization": f"Bearer {token}"}
@@ -44,10 +44,12 @@ def _radar_get(path, params=None):
     headers = _headers()
     if not headers:
         return None
+    query = dict(params or {})
+    query.setdefault("format", "json")
     response = requests.get(
         f"https://api.cloudflare.com/client/v4/radar/{path}",
         headers=headers,
-        params=params or {},
+        params=query,
         timeout=8,
     )
     response.raise_for_status()
@@ -56,7 +58,7 @@ def _radar_get(path, params=None):
 
 def get_bgp_hijacks():
     try:
-        result = _radar_get("bgp/hijacks/events", {"limit": 10})
+        result = _radar_get("bgp/hijacks/events", {"per_page": 10})
         if not result:
             return _result("token_required", FALLBACK_BGP)
         events = result.get("events") or result.get("data") or []
@@ -83,7 +85,7 @@ def get_bgp_hijacks():
 
 def get_outages():
     try:
-        result = _radar_get("annotations/outages", {"limit": 10})
+        result = _radar_get("annotations/outages", {"per_page": 10})
         if not result:
             return _result("token_required", FALLBACK_OUTAGES)
         events = result.get("annotations") or result.get("events") or result.get("data") or []

@@ -113,19 +113,20 @@ Open:
 http://127.0.0.1:5050
 ```
 
-Default local login:
+Local login is configured through `.env`:
 
 ```text
-username: admin
-password: cyberwatch
+ADMIN_USERNAME=<your username>
+ADMIN_PASSWORD=<your password>
 ```
 
 For production, set `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `SECRET_KEY` as environment variables. Do not use the default password on a public deployment.
 
-Optional feed key:
+Optional feed keys:
 
 ```text
 CLOUDFLARE_API_TOKEN=<Cloudflare API token with Radar access>
+CLOUDFLARE_RADAR_API_TOKEN=<alternate name accepted for the Radar token>
 SENSOR_INGEST_TOKEN=<long random token for sensor submissions>
 GEOIP_DB_PATH=<absolute path to GeoLite2-City.mmdb>
 ABUSEIPDB_API_KEY=<optional AbuseIPDB API key>
@@ -135,6 +136,12 @@ RDAP_ENRICHMENT_ENABLED=false
 `SENSOR_INGEST_TOKEN` must be present in the project `.env` file. The Flask app and
 `tools/sensor_forwarder.py` both load this value from `.env`; restart both processes
 after changing it. Do not reuse the Cloudflare token as the sensor token.
+
+Cloudflare Radar access requires a token with the `Account:Radar` permission. The
+application checks `CLOUDFLARE_API_TOKEN` first, then `CLOUDFLARE_RADAR_API_TOKEN`.
+If neither variable is present, the BGP and outage panels correctly show `OFFLINE`.
+If the token is present but the API is unavailable or rejects the request, they show
+`FALLBACK` rather than presenting fallback records as live data.
 
 ## API Endpoints
 
@@ -379,7 +386,14 @@ This repo includes `render.yaml`.
    - `SECRET_KEY=<secure random value>`
    - `ADMIN_USERNAME=<admin username>`
    - `ADMIN_PASSWORD=<secure password>`
+   - `CLOUDFLARE_API_TOKEN=<Cloudflare token with Account:Radar permission>`
+   - `SENSOR_INGEST_TOKEN=<long random sensor token>`
    - `DATABASE_URL` is provisioned by the included Render database resource
+
+The included `render.yaml` marks the secret values as `sync: false`, so Render asks
+you to enter them instead of committing them to the repository. After adding or
+changing `CLOUDFLARE_API_TOKEN`, redeploy the service; environment variables are
+loaded when the process starts.
 
 ### Railway
 
